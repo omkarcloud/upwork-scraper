@@ -15,11 +15,11 @@ Two surfaces, both on www.upwork.com (validated 2026-10-14):
                                 jar; it lives 24 h and is re-minted after
                                 config.UPWORK_TOKEN_TTL or on a scopes error.
 
-Cloudflare Bot Management fronts the site. From this network curl_cffi's
-Safari TLS identity passes every page; Chrome's is challenged on a few paths
-(403, header cf-mitigated: challenge), and residential exits are challenged
-more often than the datacenter egress, so sessions default to direct egress
-and rotate through config.UPWORK_IMPERSONATIONS. A call is retried on fresh
+Cloudflare Bot Management fronts the site and scores the exit IP first: the
+GKE datacenter egress is challenged on every page (403, header cf-mitigated:
+challenge), so sessions leave through sticky residential exits
+(config.UPWORK_PROXY_COUNTRIES) and rotate through
+config.UPWORK_IMPERSONATIONS. A call is retried on fresh
 sessions up to config.UPWORK_MAX_ATTEMPTS times; when every attempt was
 challenged, one headful patchright Chrome loads the page (Cloudflare's JS
 challenge runs and clears) and repeats the call — a navigation for pages, an
@@ -69,7 +69,9 @@ GRAPHQL_HEADERS = {
 # The apps whose visitor token a GraphQL call needs: the cookie the app sets,
 # a cheap public page that mints it, and the referer the app sends.
 APPS = {
-    "search": {"cookie": "UniversalSearchNuxt_vt", "warm": "/nx/search/jobs/?q=design",
+    # the talent page mints the same UniversalSearchNuxt token and is challenged
+    # less often than the jobs page on residential exits
+    "search": {"cookie": "UniversalSearchNuxt_vt", "warm": "/nx/search/talent/?q=design",
                "referer": "/nx/search/jobs/"},
     "profile": {"cookie": "profile_vv_gql_token", "warm": "/freelancers/~01d699cdd471617458",
                 "referer": "/freelancers/"},
