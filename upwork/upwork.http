@@ -1,0 +1,109 @@
+@baseUrl = http://127.0.0.1:6061
+# @baseUrl = https://upwork-scraper.omkar.cloud
+
+# ========================================
+# JOBS
+# ========================================
+
+### Job search (newest first)
+GET {{baseUrl}}/upwork/jobs/search?query=python scraping&per_page=20
+
+### Job search with filters (hourly, intermediate+expert, $20+/h, US or Europe clients with 10+ hires)
+GET {{baseUrl}}/upwork/jobs/search?query=react&job_type=hourly&experience_level=intermediate,expert&hourly_rate_min=20&client_location=United States,Europe&client_hires=10-&duration=month,semester&workload=full_time&sort=relevance&page=2
+
+### Job search: fixed-price budgets, category by name, skill id
+GET {{baseUrl}}/upwork/jobs/search?query=logo&job_type=fixed&fixed_budget=500-999,1000-4999&category=Design %26 Creative&contract_to_hire=false
+
+### Job details (id, ~02 cipher or any job link)
+GET {{baseUrl}}/upwork/jobs/details?job=https://www.upwork.com/jobs/~022110260925663995874
+
+### Job details by numeric id
+GET {{baseUrl}}/upwork/jobs/details?job=2110099034437902237
+
+### Newest jobs for a skill (the /freelance-jobs/<skill>/ page)
+GET {{baseUrl}}/upwork/jobs/by-skill?skill=Web Scraping
+
+# ========================================
+# FREELANCERS
+# ========================================
+
+### Talent search
+GET {{baseUrl}}/upwork/freelancers/search?query=python developer&per_page=20
+
+### Talent search with facets (top rated, $20-60/h, US, fluent English, JSS 90+, 100+ hours)
+GET {{baseUrl}}/upwork/freelancers/search?query=python&top_rated=true&hourly_rate_min=20&hourly_rate_max=60&location=United States&english_level=fluent&job_success_min=90&hours_min=100
+
+### Agencies only
+GET {{baseUrl}}/upwork/freelancers/search?query=react&talent_type=agency&per_page=5
+
+### Search by freelancer name
+GET {{baseUrl}}/upwork/freelancers/search?name=Ronald T&per_page=5
+
+### Freelancer profile (vanity name, ~01 cipher or profile link)
+GET {{baseUrl}}/upwork/freelancers/details?freelancer=https://www.upwork.com/freelancers/sohaibilyas
+
+### Freelancer profile by cipher
+GET {{baseUrl}}/upwork/freelancers/details?freelancer=~01d699cdd471617458
+
+### Work history (completed contracts, newest first)
+GET {{baseUrl}}/upwork/freelancers/work-history?freelancer=sohaibilyas&per_page=5&page=2
+
+### Work history (contracts in progress)
+GET {{baseUrl}}/upwork/freelancers/work-history?freelancer=sohaibilyas&status=in_progress
+
+### Top freelancers for a skill (the /hire/<skill>/ page: curated profiles, cost guide, FAQ)
+GET {{baseUrl}}/upwork/freelancers/top?skill=python
+
+### Top freelancers from a hire link
+GET {{baseUrl}}/upwork/freelancers/top?skill=https://www.upwork.com/hire/data-extraction-freelancers/
+
+# ========================================
+# AGENCIES
+# ========================================
+
+### Agency profile (id, ~01 cipher or agency link)
+GET {{baseUrl}}/upwork/agencies/details?agency=~01559cda955b6ac18a
+
+### Agency members
+GET {{baseUrl}}/upwork/agencies/members?agency=425249375254638592
+
+### Agency work history (closed contracts)
+GET {{baseUrl}}/upwork/agencies/work-history?agency=425249375254638592&per_page=5
+
+### Agency work history (active contracts)
+GET {{baseUrl}}/upwork/agencies/work-history?agency=https://www.upwork.com/agencies/425249375254638592/&status=active&per_page=5
+
+### Agency portfolio
+GET {{baseUrl}}/upwork/agencies/portfolio?agency=425249375254638592&per_page=4
+
+# ========================================
+# SERVICES (project catalog)
+# ========================================
+
+### Catalog search with facet counts
+GET {{baseUrl}}/upwork/services/search?query=web scraping&with_facets=true
+
+### Catalog search, page 2
+GET {{baseUrl}}/upwork/services/search?query=web scraping&page=2
+
+### Catalog search with filters (category id from the facets, price, delivery, seller quality)
+GET {{baseUrl}}/upwork/services/search?query=logo&category=logoDesign&price_min=20&price_max=100&delivery_days=7&top_rated=true&rating_min=4.5&english_level=fluent
+
+### Service details (id, slug or link)
+GET {{baseUrl}}/upwork/services/details?service=1585271712814411776
+
+### A seller's services
+GET {{baseUrl}}/upwork/services/by-seller?freelancer=gimar
+
+# ========================================
+# METADATA
+# ========================================
+
+### Category tree (ids for the job search category / subcategory filters)
+GET {{baseUrl}}/upwork/categories
+
+### Search box autocomplete + related searches
+GET {{baseUrl}}/upwork/suggest?query=python dev
+
+### Project catalog autocomplete
+GET {{baseUrl}}/upwork/suggest?query=web scra&type=services

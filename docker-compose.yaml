@@ -1,0 +1,10 @@
+services:
+  upwork-scraper:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      # Optional — a home or office IP passes Cloudflare without one.
+      # - UPWORK_PROXY=http://user:pass@host:port
