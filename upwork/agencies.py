@@ -23,8 +23,14 @@ def org_id(agency):
     name (the page redirects to the canonical /agencies/<id>/)."""
     if agency.isdigit():
         return agency
-    return fetch.memoized(("agency-id", agency), lambda: str(P.g(_agency_page(agency), "vuex", "agencyProfile", "agencyId")
-                                                             or P.g(_agency_page(agency), "vuex", "agencyProfile", "agency", "id")))
+
+    def resolve():
+        state = _agency_page(agency)
+        oid = P.g(state, "vuex", "agencyProfile", "agencyId") or P.g(state, "vuex", "agencyProfile", "agency", "id")
+        if not oid:
+            raise fetch.UpworkNotFound(f"Upwork has no agency {agency}")
+        return str(oid)
+    return fetch.memoized(("agency-id", agency), resolve)
 
 
 def details(agency):

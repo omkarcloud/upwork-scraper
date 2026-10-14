@@ -171,8 +171,6 @@ def job_card(result):
         "duration": duration,
         "workload": V.lower_snake(job.get("hourlyEngagementType")),
         "skills": skills(result.get("ontologySkills")),
-        "highlighted_skills": [s["name"] for s in (skills([x for x in as_list(result.get("ontologySkills"))
-                                                            if g(x, "highlighted")]))],
         "created_at": V.iso_datetime(job.get("createTime")),
         "published_at": V.iso_datetime(job.get("publishTime")),
     }
@@ -203,6 +201,15 @@ def job_facets(facets):
 
 # ---- jobs: details -------------------------------------------------------------------------------
 
+def _qualification_location(value):
+    """The required freelancer location: a plain string, or Upwork's
+    {city, state, country, …} object -> "City, State, Country" (None when empty)."""
+    if isinstance(value, dict):
+        parts = [V.text(value.get(k)) for k in ("city", "state", "country")]
+        return ", ".join(p for p in parts if p) or None
+    return V.text(value) if isinstance(value, str) else None
+
+
 def _qualifications(q):
     q = as_dict(q)
     out = {
@@ -217,7 +224,7 @@ def _qualifications(q):
         "timezones": as_list(q.get("timezones")) or None,
         "languages": as_list(q.get("languages")) or None,
         "on_site_type": V.lower_snake(q.get("onSiteType")),
-        "location": V.text(q.get("location")) or V.text(q.get("localDescription")),
+        "location": _qualification_location(q.get("location")) or V.text(q.get("localDescription")),
     }
     return out if any(v for v in out.values()) else None
 
@@ -343,7 +350,8 @@ def job_details(state):
         "occupation": {"id": occupation.get("uid") or occupation.get("id"), "name": V.text(occupation.get("prefLabel"))}
         if occupation else None,
         "skills": _sands_skills(sands),
-        "tools": [V.text(t) for t in as_list(job.get("tools")) if t] or None,
+        "tools": [n for n in (V.text(t.get("name") if isinstance(t, dict) else t) for t in as_list(job.get("tools"))) if n]
+        or None,
         "deliverables": V.multiline(job.get("deliverables")),
         "positions_to_hire": V.to_int(job.get("numberOfPositionsToHire") or activity.get("numberOfPositionsToHire")),
         "is_contract_to_hire": bool(job.get("isContractToHire")),
@@ -728,8 +736,31 @@ def freelancer_profile(state, html=None):
             "in_progress": work_history_page(in_progress, V.to_int(in_progress.get("currentPage")) or 1,
                                              V.to_int(in_progress.get("itemsPerPage")) or 10),
         },
-        "testimonials": as_list(g(pv, "testimonials")) or None,
+        "testimonials": [t for t in (testimonial(x) for x in as_list(g(pv, "testimonials"))) if t] or None,
         "related_skills": [V.text(s.get("pretty") or s.get("name")) for s in as_list(g(pv, "relatedSkills")) if isinstance(s, dict)] or None,
+    }
+
+
+def _ts(value):
+    """Postgres-style '2025-07-21 14:42:47.086989+00' -> ISO UTC."""
+    return V.iso_datetime(str(value).replace(" ", "T").replace("+00", "+00:00")) if value else None
+
+
+def testimonial(item):
+    """A client testimonial on a profile (off-platform clients vouching)."""
+    item = as_dict(item)
+    quote = V.multiline(item.get("quote"))
+    if not quote:
+        return None
+    first, last = V.text(item.get("firstName")), V.text(item.get("lastName"))
+    return {
+        "id": str(item.get("uid") or "") or None,
+        "client_name": " ".join(x for x in (first, last) if x) or None,
+        "position": V.text(item.get("position")),
+        "project_name": V.text(item.get("projectName")),
+        "company_country": V.text(item.get("companyCountry")),
+        "quote": quote,
+        "created_at": _ts(item.get("createdTs")),
     }
 
 
@@ -1056,7 +1087,7 @@ def service_details(state):
     for item in as_list(wrapper.get("media")):
         try:
             meta = json.loads(g(item, "metadataJson") or "{}")
-        except ValueError:
+        except (ValueError, TypeError):
             meta = {}
         url = meta.get("secure_url") or g(meta, "links", "c_scale,w_1000/jpg")
         if url:
@@ -1081,8 +1112,8 @@ def service_details(state):
                          for r in as_list(project.get("requirementsFormJson")) if isinstance(r, dict)] or None,
         "max_queue_size": V.to_int(project.get("maxQueueSize")),
         "active_orders": V.to_int(project.get("currentOrdersCount")),
-        "created_at": V.iso_datetime(str(project.get("createdTs") or "").replace(" ", "T").replace("+00", "+00:00")),
-        "updated_at": V.iso_datetime(str(project.get("updatedTs") or "").replace(" ", "T").replace("+00", "+00:00")),
+        "created_at": _ts(project.get("createdTs")),
+        "updated_at": _ts(project.get("updatedTs")),
         "seller": {
             **(_seller(freelancer) or {}),
             "title": V.text(freelancer.get("title")),
