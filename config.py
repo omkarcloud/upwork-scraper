@@ -38,3 +38,10 @@ UPWORK_PROXY = os.environ.get("UPWORK_PROXY") or None
 def upwork_proxy():
     """The proxy every session uses (None = direct)."""
     return os.environ.get("UPWORK_PROXY") or None
+
+
+# ---- added by the sync: defaults for a direct run ----
+UPWORK_BROWSER_SLOTS = 1
+def burst_slots(share):
+    return share
+

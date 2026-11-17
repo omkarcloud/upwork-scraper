@@ -16,6 +16,7 @@ from marshmallow import ValidationError, fields, validate
 from schema_fields import (BaseSchema, ChoiceField, CommaListField, Flag, LanguageCodeField, PageField, PageSizeField,
                            PositiveInt, QueryField, RefField, StrippedString, NonNegativeNumber)
 from upwork import agencies, freelancers, jobs, refdata, refs, services
+from scraper_utils.schema import max_length as _max_length
 
 
 class JobField(RefField):
@@ -36,15 +37,6 @@ class ServiceField(RefField):
 
 class SkillField(RefField):
     resolver = staticmethod(refs.resolve_skill)
-
-
-def _max_length(n):
-    """validate.Length(max=n) that tolerates the None StrippedString returns
-    for an empty value (marshmallow runs validators on it; len(None) is a 500)."""
-    def check(value):
-        if value is not None and len(value) > n:
-            raise ValidationError(f"Longer than maximum length {n}.")
-    return check
 
 
 class OptionalQuery(StrippedString):

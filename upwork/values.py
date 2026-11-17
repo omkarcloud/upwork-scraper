@@ -3,6 +3,8 @@ and links. Pure functions; every helper tolerates None and junk."""
 import html as html_lib
 import re
 from datetime import datetime, timezone
+from scraper_utils.text import multiline
+from scraper_utils.dates import iso_utc as iso_datetime
 
 SITE = "https://www.upwork.com"
 
@@ -75,17 +77,6 @@ def text(value):
     return out or None
 
 
-def multiline(value):
-    """Like text() but keeps paragraph breaks (descriptions, reviews)."""
-    if value is None:
-        return None
-    raw = _HIGHLIGHT_RE.sub("", str(value))
-    lines = [" ".join(line.split()) for line in html_lib.unescape(raw).replace("\xa0", " ").splitlines()]
-    out = "\n".join(lines)
-    out = re.sub(r"\n{3,}", "\n\n", out).strip()
-    return out or None
-
-
 def lower_snake(value):
     """'IntermediateLevel' / 'top_rated' / 'PART_TIME' -> 'intermediate_level' / 'top_rated' / 'part_time'."""
     if value is None:
@@ -107,21 +98,6 @@ def strip_html(value):
 
 
 # ---- dates -------------------------------------------------------------------------------
-
-def iso_datetime(value):
-    """ISO-8601 string with any offset -> UTC 'YYYY-MM-DDTHH:MM:SSZ'; junk -> None."""
-    if not value or not isinstance(value, str):
-        return None
-    s = value.strip()
-    if not s:
-        return None
-    try:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00").replace("+0000", "+00:00"))
-    except ValueError:
-        return None
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def iso_date(value):

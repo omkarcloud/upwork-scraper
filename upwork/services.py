@@ -96,10 +96,31 @@ def search(query=None, page=1, category=None, project_type=None, price_min=None,
     return out
 
 
+def _page_state(html):
+    """The service page's store in the shape service_details() reads
+    ({"state": {"projects": ..., "reviews": ...}}). The project catalog moved
+    from Nuxt 2 (window.__NUXT__ = (function(){...})) to Nuxt 3 between
+    2026-10-28 and 2026-11-01: the page now carries a devalue
+    `__NUXT_DATA__` payload whose vuex store is the old `state` object, and
+    only an empty `window.__NUXT__={}` config stub — which is why the Nuxt 2
+    decoder found "no window.__NUXT__ function". Nuxt 3 is tried first; the
+    Nuxt 2 form stays as the fallback."""
+    try:
+        state = nuxt.decode_nuxt3(html)
+    except nuxt.NuxtStateError:
+        return nuxt.decode_nuxt2(html)
+    store = state.get("vuex")
+    if not isinstance(store, dict):
+        raise nuxt.NuxtStateError("__NUXT_DATA__ carries no vuex store")
+    errors = state.get("_errors")
+    error = next((e for e in errors.values() if e), None) if isinstance(errors, dict) else None
+    return {"state": store, "error": error or {}}
+
+
 def details(service):
     html = fetch.page(f"/services/product/{service}", label=f"service {service}")
     try:
-        state = nuxt.decode_nuxt2(html)
+        state = _page_state(html)
     except nuxt.NuxtStateError as e:
         raise fetch.UpworkUpstreamError(f"service page {service}: {e}")
     if P.g(state, "error", "statusCode") == 404:

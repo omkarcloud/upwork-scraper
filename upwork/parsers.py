@@ -15,36 +15,13 @@ expire within minutes (originalPortrait, agency banner), internal record
 numbers (rid / recno), and the job's AI-generation history (annotations.
 customFields.*AIv2 — the client's draft prompts, not the posting).
 """
-import json
+import fastjson
 import re
 
 from upwork import values as V
+from scraper_utils.values import as_dict, as_list, g
 
 SITE = V.SITE
-
-
-def g(obj, *path, default=None):
-    """Safe nested get: g(d, "a", "b", 0) -> d["a"]["b"][0] or default."""
-    for step in path:
-        if isinstance(step, int):
-            if not isinstance(obj, list) or not -len(obj) <= step < len(obj):
-                return default
-            obj = obj[step]
-        else:
-            if not isinstance(obj, dict):
-                return default
-            obj = obj.get(step)
-        if obj is None:
-            return default
-    return obj
-
-
-def as_list(value):
-    return value if isinstance(value, list) else []
-
-
-def as_dict(value):
-    return value if isinstance(value, dict) else {}
 
 
 def n(obj, *path, default=None):
@@ -973,7 +950,7 @@ def _cover_image(tile):
         return url
     meta = g(tile, "coverMedia", "metadataJson") or g(tile, "media", 0, "metadataJson")
     try:
-        return g(json.loads(meta), "secure_url") if isinstance(meta, str) else None
+        return g(fastjson.loads(meta), "secure_url") if isinstance(meta, str) else None
     except ValueError:
         return None
 
@@ -1086,7 +1063,7 @@ def service_details(state):
     media = []
     for item in as_list(wrapper.get("media")):
         try:
-            meta = json.loads(g(item, "metadataJson") or "{}")
+            meta = fastjson.loads(g(item, "metadataJson") or "{}")
         except (ValueError, TypeError):
             meta = {}
         url = meta.get("secure_url") or g(meta, "links", "c_scale,w_1000/jpg")

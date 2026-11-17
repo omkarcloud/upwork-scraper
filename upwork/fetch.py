@@ -35,6 +35,7 @@ Failure taxonomy (scraper_errors, mapped to HTTP by route_glue):
 Smoke test:  python upwork/fetch.py [search term]
 """
 import json
+import fastjson
 import os
 import random
 import sys
@@ -46,8 +47,11 @@ from urllib.parse import urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import browser_client
 import config
+import egress
 from scraper_errors import BadRequest, Blocked, NotFound, UpstreamError
+from scraper_utils import debug, memo
 
 SITE = "https://www.upwork.com"
 GRAPHQL_PATH = "/api/graphql/v1"
@@ -55,12 +59,10 @@ TIMEOUT = (10, 60)          # (connect, read) — search pages are 1-2 MB
 
 PAGE_HEADERS = {
     "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "accept-language": "en-US,en;q=0.9",
     "upgrade-insecure-requests": "1",
 }
 GRAPHQL_HEADERS = {
     "accept": "*/*",
-    "accept-language": "en-US,en;q=0.9",
     "content-type": "application/json",
     "origin": SITE,
     "x-upwork-accept-language": "en-US",
@@ -118,14 +120,7 @@ class _TokenError(UpworkUpstreamError):
 
 def dump_debug(name, text):
     """Write a raw response to $UPWORK_DEBUG_DIR/<name>.txt."""
-    dbg = os.environ.get("UPWORK_DEBUG_DIR", "")
-    if dbg and text:
-        try:
-            os.makedirs(dbg, exist_ok=True)
-            with open(os.path.join(dbg, name + ".txt"), "w") as f:
-                f.write(text if isinstance(text, str) else json.dumps(text))
-        except OSError:
-            pass
+    debug.dump("UPWORK_DEBUG_DIR", name, text, render=json.dumps)
 
 
 # ---- sessions -----------------------------------------------------------------------------
@@ -176,6 +171,7 @@ def _new_session():
         _fresh_count += 1
     proxy = config.upwork_proxy()
     sess = curl_requests.Session(impersonate=impersonate)
+    sess.headers["accept-language"] = egress.accept_language(proxy)
     if proxy:
         sess.proxies = {"http": proxy, "https": proxy}
     return _Session(sess, proxy, impersonate)
@@ -242,7 +238,7 @@ def classify(status, headers, text, label, final_url=None):
 
 def _parse_json(text, label):
     try:
-        return json.loads(text) if text.strip() else None
+        return fastjson.loads(text) if text.strip() else None
     except ValueError:
         dump_debug("non_json", text)
         if any(m in text[:5000] for m in CHALLENGE_MARKERS):
@@ -250,124 +246,39 @@ def _parse_json(text, label):
         raise UpworkUpstreamError(f"non-JSON body on {label}")
 
 
-# ---- browser fallback -------------------------------------------------------------------------
+# ---- browser fallback (on the browser box) -------------------------------------------------------
 
-class _Browser:
-    """One headful patchright Chrome, opened on demand, reused while busy
-    and closed after config.UPWORK_BROWSER_IDLE_SECONDS unused."""
-
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.driver = None
-        self.last_used = 0.0
-        self.closer = None
-
-    def _open(self):
-        from chrome_manager import create_scope
-        from patchright_driver import PatchrightDriver
-        with create_scope():
-            driver = PatchrightDriver(proxy_url=config.upwork_proxy(), headless=False, geoip_timezone=True)
-        try:
-            self._nav(driver, SITE + BROWSER_WARM_PATH)
-        except Exception:
-            driver.close()
-            raise
-        return driver
-
-    @staticmethod
-    def _nav(driver, url):
-        """Navigate and wait for a real Upwork page (one carrying Nuxt state)."""
-        result = driver.nav(url, referer="https://www.google.com/", mode="blocked")
-        html = (result or {}).get("html") or ""
-        deadline = time.monotonic() + BROWSER_SETTLE_TIMEOUT
-        while "__NUXT_DATA__" not in html and "window.__NUXT__" not in html:
-            if time.monotonic() > deadline:
-                raise UpworkBlocked("browser never cleared the Cloudflare challenge")
-            time.sleep(1.5)
-            try:
-                html = driver.content() or ""
-            except Exception:
-                html = ""
-        return html, (result or {}).get("status") or 200, (result or {}).get("url") or url
-
-    def _close_if_idle(self):
-        while True:
-            time.sleep(30)
-            with self.lock:
-                if self.driver is None:
-                    self.closer = None
-                    return
-                if time.time() - self.last_used > config.UPWORK_BROWSER_IDLE_SECONDS:
-                    self._drop()
-                    self.closer = None
-                    return
-
-    def _drop(self):
-        if self.driver is not None:
-            try:
-                self.driver.close()
-            except Exception:
-                pass
-        self.driver = None
-
-    def _ensure(self):
-        if self.driver is None:
-            self.driver = self._open()
-        if self.closer is None:
-            self.closer = threading.Thread(target=self._close_if_idle, daemon=True)
-            self.closer.start()
-        self.last_used = time.time()
-
-    def page(self, url, label):
-        with self.lock:
-            self._ensure()
-            try:
-                html, status, final_url = self._nav(self.driver, url)
-            except UpworkNotFound:
-                raise
-            except Exception:
-                self._drop()
-                raise
-        return classify(status if status else 200, {}, html, label, final_url)
-
-    def _token(self, app):
-        name = APPS[app]["cookie"]
-        for cookie in self.driver.cookies():
-            if cookie.get("name") == name and cookie.get("value"):
-                return cookie["value"]
-        return None
-
-    def graphql(self, app, alias, body, label):
-        from patchright_driver import _FETCH_JS, FETCH_TIMEOUT_MS
-        with self.lock:
-            self._ensure()
-            try:
-                token = self._token(app)
-                if not token:
-                    self._nav(self.driver, SITE + APPS[app]["warm"])
-                    token = self._token(app)
-                if not token:
-                    raise UpworkUpstreamError(f"browser has no {APPS[app]['cookie']} cookie for {label}")
-                headers = {"accept": "*/*", "content-type": "application/json",
-                           "authorization": f"Bearer {token}", "x-upwork-accept-language": "en-US"}
-                res = self.driver.call(lambda page: page.evaluate(_FETCH_JS, {
-                    "url": f"{SITE}{GRAPHQL_PATH}?alias={alias}", "method": "POST", "headers": headers,
-                    "body": json.dumps(body, separators=(",", ":")), "referrer": SITE + APPS[app]["referer"],
-                    "timeoutMs": FETCH_TIMEOUT_MS}))
-            except Exception:
-                self._drop()
-                raise
-        if not res or (not res.get("status") and res.get("error")):
-            raise UpworkUpstreamError(f"browser fetch failed on {label}: {(res or {}).get('error')}")
-        status = int(res.get("status") or 0)
-        text = res.get("body") or ""
-        if status in BLOCK_STATUSES:
-            with self.lock:
-                self._drop()
-        return classify(status, res.get("headers") or {}, text, label)
+# Sticky Upwork residential exits for the box's Chromes (recipes/upwork.py:
+# warms the jobs search, serves page navigations and in-page graphql POSTs
+# with the Bearer token from its own cookie jar). UPWORK_BROWSER_SLOTS is
+# the share; every exit is offered as a candidate and the box picks an idle
+# browser or opens one while it has headroom (one exit, one browser, until
+# 2026-11-04). A block burns the exit the box used: that browser is closed
+# and the slot re-minted. Chrome left GKE 2026-10-22.
+_EXITS = browser_client.ExitPool("upwork", lambda: config.upwork_proxy(),
+                                 size=lambda: config.UPWORK_BROWSER_SLOTS, burst=True)
 
 
-_browser = _Browser()
+def _box_call(label, **kw):
+    try:
+        _proxy, res = _EXITS.fetch_any("upwork", **kw)
+        return res
+    except browser_client.BoxRefused as e:
+        _EXITS.rotate(e.proxy)
+        raise UpworkBlocked(f"{label}: refused in the box browser: {e}") from e
+    except browser_client.BoxUnavailable as e:
+        raise UpworkUpstreamError(f"{label}: browser box unavailable: {e}") from e
+
+
+def _box_page(url, label):
+    res = _box_call(label, url=url)
+    return classify(int(res.get("status") or 200), {}, res.get("body") or "", label, res.get("final_url") or url)
+
+
+def _box_graphql(app, alias, body, label):
+    res = _box_call(label, url=f"{SITE}{GRAPHQL_PATH}?alias={alias}", method="POST",
+                    headers={"x-upwork-app": app}, body=json.dumps(body, separators=(",", ":")))
+    return classify(int(res.get("status") or 0), res.get("headers") or {}, res.get("body") or "", label)
 
 
 # ---- requests -----------------------------------------------------------------------------------
@@ -465,7 +376,7 @@ def page(path, params=None, label=None):
     """GET a public www.upwork.com page -> HTML (after redirects)."""
     url = _url(path, params)
     label = label or path
-    return _with_sessions(lambda s: _curl_page(s, url, label), lambda: _browser.page(url, label), label)
+    return _with_sessions(lambda s: _curl_page(s, url, label), lambda: _box_page(url, label), label)
 
 
 def _graphql_errors(payload, label):
@@ -501,7 +412,7 @@ def graphql(app, query, variables=None, alias=None, label=None):
             raise
 
     def via_browser():
-        payload = _parse_json(_browser.graphql(app, alias, body, label), label)
+        payload = _parse_json(_box_graphql(app, alias, body, label), label)
         return _graphql_errors(payload, label)
 
     return _with_sessions(via_curl, via_browser, label)
@@ -517,19 +428,7 @@ MEMO_MAX = 2048
 
 
 def memoized(key, fn, ttl=MEMO_TTL):
-    now = time.monotonic()
-    with _memo_lock:
-        hit = _memo.get(key)
-        if hit and now - hit[0] < ttl:
-            _memo.move_to_end(key)
-            return hit[1]
-    value = fn()
-    with _memo_lock:
-        _memo[key] = (now, value)
-        _memo.move_to_end(key)
-        while len(_memo) > MEMO_MAX:
-            _memo.popitem(last=False)
-    return value
+    return memo.memoized(_memo, _memo_lock, MEMO_MAX, key, fn, ttl)
 
 
 def run_parallel(fns, workers=None):

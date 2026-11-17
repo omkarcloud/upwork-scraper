@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from schema_fields import load_query  # noqa: E402
 from upwork import (agencies, fetch, freelancers, jobs, meta, nuxt, parsers as P, refdata, refs,  # noqa: E402
                     schemas, services, values as V)
+from scraper_utils.testing import hosted_only
 
 FX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
@@ -473,3 +474,54 @@ def test_meta_endpoints(transport):
     assert out["suggestions"][0]["text"] == "python developer" and out["related_queries"]
     out = meta.suggest("web scra", kind="services")
     assert out["suggestions"][0]["frequency"] == 5484
+
+
+# ---- the box exit pool (upwork/fetch.py _box_call) --------------------------------------
+
+def _fake_box(monkeypatch, busy):
+    """browser_client.fetch_any stand-in: picks the first candidate not in
+    `busy`; a BoxRefused scripted in `answers` is raised on that candidate."""
+    import browser_client
+    log, answers = [], []
+
+    def fetch_any(site, candidates, **kw):
+        index = next(i for i in range(len(candidates)) if i not in busy)
+        log.append((candidates[index][0], [c[0] for c in candidates]))
+        if answers and isinstance(answers[0], Exception):
+            e = answers.pop(0); e.candidate = index
+            raise e
+        return index, {"status": 200, "headers": {}, "body": "<html>ok</html>", "final_url": kw.get("url")}
+    monkeypatch.setattr(browser_client, "fetch_any", fetch_any)
+    return log, answers
+
+
+@hosted_only
+def test_box_calls_spread_over_sticky_exits_and_rotate_only_the_refused_one(monkeypatch):
+    import itertools
+    import browser_client
+    import config
+    from upwork import fetch
+    ports = itertools.count(10001)
+    monkeypatch.setattr(config, "upwork_proxy", lambda: f"http://u:p@gw:{next(ports)}")
+    monkeypatch.setattr(config, "UPWORK_BROWSER_SLOTS", 2)
+    monkeypatch.setattr(config, "BROWSER_BURST_FACTOR", 1)
+    fetch._EXITS.reset()
+    busy = set()
+    log, answers = _fake_box(monkeypatch, busy)
+    fetch._box_page("https://www.upwork.com/nx/search/jobs/?q=a", "a")
+    busy.add(0)                                                 # the first browser is serving another call
+    fetch._box_page("https://www.upwork.com/nx/search/jobs/?q=b", "b")
+    busy.clear()
+    fetch._box_page("https://www.upwork.com/nx/search/jobs/?q=c", "c")
+    assert [p for p, _ in log] == ["http://u:p@gw:10001", "http://u:p@gw:10002", "http://u:p@gw:10001"]
+    assert log[-1][1] == ["http://u:p@gw:10001", "http://u:p@gw:10002"]   # the share, offered on every call
+    # a refusal burns the exit the box used, the other slot is kept
+    answers.append(browser_client.BoxRefused("upwork/fetch: 502 recipe"))
+    with pytest.raises(fetch.UpworkBlocked):
+        fetch._box_page("https://www.upwork.com/nx/search/jobs/?q=d", "d")
+    assert fetch._EXITS.current() == ["http://u:p@gw:10003", "http://u:p@gw:10002"]
+    # the default factor offers share x 4 candidates
+    monkeypatch.setattr(config, "BROWSER_BURST_FACTOR", 4)
+    fetch._box_page("https://www.upwork.com/nx/search/jobs/?q=e", "e")
+    assert len(log[-1][1]) == 8
+    fetch._EXITS.reset()

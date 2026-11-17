@@ -21,7 +21,7 @@ formats back into plain Python.
 Both decoders raise NuxtStateError when the markup is not what they expect
 (a Cloudflare interstitial, a layout change) so the caller can classify it.
 """
-import json
+import fastjson
 import re
 
 _NUXT3_RE = re.compile(r'<script[^>]+id="__NUXT_DATA__"[^>]*>(.*?)</script>', re.S)
@@ -45,7 +45,7 @@ def decode_nuxt3(html):
     if not match:
         raise NuxtStateError("no __NUXT_DATA__ script in the page")
     try:
-        values = json.loads(match.group(1))
+        values = fastjson.loads(match.group(1))
     except ValueError as e:
         raise NuxtStateError(f"__NUXT_DATA__ is not JSON: {e}")
     if not isinstance(values, list) or not values:
@@ -73,7 +73,7 @@ def decode_nuxt3(html):
                 if tag in ("EmptyRef", "EmptyShallowRef"):
                     # Nuxt's reviver: "_" is undefined, "0n" BigInt(0), else JSON
                     try:
-                        out = None if raw[1] == "_" else json.loads(raw[1]) if isinstance(raw[1], str) else raw[1]
+                        out = None if raw[1] == "_" else fastjson.loads(raw[1]) if isinstance(raw[1], str) else raw[1]
                     except ValueError:
                         out = raw[1]
                     memo[index] = out
@@ -400,7 +400,7 @@ def ld_json(html):
     out = []
     for raw in _LD_JSON_RE.findall(html or ""):
         try:
-            out.append(json.loads(raw))
+            out.append(fastjson.loads(raw))
         except ValueError:
             continue
     return out
